@@ -179,8 +179,8 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
     };
 
-    const currentHost = window.location.hostname || '127.0.0.1';
-    const API_BASE_URL = `http://${currentHost}:5000/api`;
+    // Use relative path for API so it works both locally and on Render
+    const API_BASE_URL = '/api';
     let deliveriesData = [];
     let stylesData = [];
     let materialsData = [];

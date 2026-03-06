@@ -36,7 +36,9 @@ def log_error():
     print(f"!!! FRONTEND JS ERROR !!!\nMessage: {data.get('message')}\nFile: {data.get('filename')}\nLine: {data.get('lineno')}:{data.get('colno')}\n---------------------------")
     return jsonify({"status": "logged"})
 
-DATABASE = 'database.db'
+import os
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATABASE = os.path.join(BASE_DIR, 'database.db')
 
 def get_db():
     conn = sqlite3.connect(DATABASE)
@@ -56,7 +58,7 @@ def init_db():
                 items INTEGER DEFAULT 0
             )
         ''')
-        
+
         # Create Tracking Templates Table
         db.execute('''
             CREATE TABLE IF NOT EXISTS tracking_templates (
@@ -65,7 +67,7 @@ def init_db():
                 steps TEXT NOT NULL -- JSON array of steps: {name, duration, dependency, team}
             )
         ''')
-        
+
         # Insert Default Tracking Template safely if it doesn't exist
         cursor = db.execute('SELECT COUNT(*) FROM tracking_templates')
         if cursor.fetchone()[0] == 0:
@@ -88,7 +90,7 @@ def init_db():
             db.execute('ALTER TABLE styles ADD COLUMN actualCompletionDates TEXT DEFAULT "{}"')
         except sqlite3.OperationalError:
             pass # Columns already exist or table doesn't exist yet
-            
+
         db.execute('''
             CREATE TABLE IF NOT EXISTS styles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,12 +123,12 @@ def init_db():
         try:
             db.execute("ALTER TABLE styles ADD COLUMN bomData TEXT DEFAULT '[]'")
         except sqlite3.OperationalError:
-            pass 
+            pass
 
         try:
             db.execute("ALTER TABLE styles ADD COLUMN trackingSteps TEXT")
         except sqlite3.OperationalError:
-            pass 
+            pass
 
         try:
             db.execute("ALTER TABLE styles ADD COLUMN lastEditedBy TEXT")
@@ -146,7 +148,7 @@ def init_db():
             db.execute("ALTER TABLE deliveries ADD COLUMN deletedAt TEXT")
         except sqlite3.OperationalError:
             pass
-            
+
         try:
             db.execute("ALTER TABLE styles ADD COLUMN isDeleted INTEGER DEFAULT 0")
         except sqlite3.OperationalError:
@@ -229,11 +231,11 @@ def add_template():
 @app.route('/api/templates/<int:id>', methods=['DELETE'])
 def delete_template(id):
     db = get_db()
-    
+
     # Don't delete the fallback template (id=1)
     if id == 1:
         return jsonify({"success": False, "error": "Cannot delete default template"}), 403
-        
+
     db.execute('UPDATE tracking_templates SET isDeleted = 1, deletedAt = ? WHERE id = ?', (datetime.now().isoformat(), id))
     db.commit()
     return jsonify({"success": True})
@@ -244,7 +246,7 @@ def update_template(id):
     db = get_db()
     steps_json = json.dumps(data.get('steps', []))
     db.execute('''
-        UPDATE tracking_templates 
+        UPDATE tracking_templates
         SET name = ?, steps = ?
         WHERE id = ?
     ''', (data['name'], steps_json, id))
@@ -277,13 +279,13 @@ def add_delivery():
 @app.route('/api/deliveries/<int:id>', methods=['DELETE'])
 def delete_delivery(id):
     db = get_db()
-    
+
     # Soft delete the delivery
     db.execute('UPDATE deliveries SET isDeleted = 1, deletedAt = ? WHERE id = ?', (datetime.now().isoformat(), id))
-    
+
     # Cascading soft delete for styles within this delivery
     db.execute('UPDATE styles SET isDeleted = 1, deletedAt = ? WHERE deliveryId = ?', (datetime.now().isoformat(), id))
-    
+
     db.commit()
     return jsonify({"success": True})
 
@@ -292,7 +294,7 @@ def update_delivery(id):
     data = request.json
     db = get_db()
     db.execute('''
-        UPDATE deliveries 
+        UPDATE deliveries
         SET name = ?
         WHERE id = ?
     ''', (data['name'], id))
@@ -305,22 +307,22 @@ def update_delivery(id):
 def get_styles():
     deliveryId = request.args.get('deliveryId')
     db = get_db()
-    
+
     if deliveryId:
         cursor = db.execute('''
-            SELECT s.*, 
+            SELECT s.*,
                    (SELECT COUNT(*) FROM style_materials WHERE styleId = s.id) as materialCount
-            FROM styles s 
+            FROM styles s
             WHERE s.deliveryId = ? AND s.isDeleted = 0
         ''', (deliveryId,))
     else:
         cursor = db.execute('''
-            SELECT s.*, 
+            SELECT s.*,
                    (SELECT COUNT(*) FROM style_materials WHERE styleId = s.id) as materialCount
             FROM styles s
             WHERE s.isDeleted = 0
         ''')
-        
+
     styles = []
     for row in cursor.fetchall():
         style_dict = dict(row)
@@ -333,34 +335,34 @@ def get_styles():
             style_dict['trackingSteps'] = json.loads(style_dict.get('trackingSteps', 'null'))
         except:
             style_dict['trackingSteps'] = None
-            
+
         style_dict['hasMaterials'] = style_dict['materialCount'] > 0
         styles.append(style_dict)
-        
+
     return jsonify(styles)
 
 @app.route('/api/styles', methods=['POST'])
 def add_style():
     data = request.json
     db = get_db()
-    
+
     sizes_json = json.dumps(data['sizes'])
-    
+
     cursor = db.execute('''
         INSERT INTO styles (deliveryId, no, desc, color, category, sizes, qty, status, orderDate, dueDate, trackingTemplateId, trackerStep, actualCompletionDates, deliveryDate, image, createdDate, designRejections, bomData, trackingSteps)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
-        data['deliveryId'], data['no'], data['desc'], data['color'], 
-        data['category'], sizes_json, data['qty'], data['status'], 
+        data['deliveryId'], data['no'], data['desc'], data['color'],
+        data['category'], sizes_json, data['qty'], data['status'],
         data['orderDate'], data.get('dueDate'), data.get('trackingTemplateId', 1),
         data.get('trackerStep', 0), data.get('actualCompletionDates', '{}'),
         data.get('deliveryDate'), data.get('image', ''), data.get('createdDate', datetime.now().isoformat()), data.get('designRejections', 0),
         json.dumps(data.get('bomData', [])), data.get('trackingSteps')
     ))
-    
+
     # Update delivery item count
     db.execute('UPDATE deliveries SET items = items + 1 WHERE id = ?', (data['deliveryId'],))
-    
+
     db.commit()
     return jsonify({"id": cursor.lastrowid}), 201
 
@@ -370,7 +372,7 @@ def get_style(id):
     row = db.execute('SELECT * FROM styles WHERE id = ? AND isDeleted = 0', (id,)).fetchone()
     if not row:
         return jsonify({"error": "Style not found"}), 404
-    
+
     style_dict = dict(row)
     style_dict['sizes'] = json.loads(style_dict['sizes'])
     try:
@@ -381,25 +383,25 @@ def get_style(id):
         style_dict['trackingSteps'] = json.loads(style_dict.get('trackingSteps', 'null'))
     except:
         style_dict['trackingSteps'] = None
-    
+
     return jsonify(style_dict)
 
 @app.route('/api/styles/<int:id>', methods=['PUT'])
 def update_style(id):
     data = request.json
     db = get_db()
-    
+
     # Check if this is a trackerStep update only or a full update
     if 'trackerStep' in data and len(data) <= 4: # allow for id, trackerStep, deliveryDate, actualCompletionDates
         db.execute('''
-            UPDATE styles 
+            UPDATE styles
             SET trackerStep = ?, deliveryDate = ?, actualCompletionDates = ?
             WHERE id = ?
         ''', (data['trackerStep'], data.get('deliveryDate'), data.get('actualCompletionDates', '{}'), id))
     elif 'designRejections' in data and len(data) <= 2:
         db.execute('''
-            UPDATE styles 
-            SET designRejections = ? 
+            UPDATE styles
+            SET designRejections = ?
             WHERE id = ?
         ''', (data['designRejections'], id))
     else:
@@ -408,7 +410,7 @@ def update_style(id):
         if not existing:
             return jsonify({"error": "Style not found"}), 404
         style = dict(existing)
-        
+
         merged = {
             "no": data.get('no', style['no']),
             "desc": data.get('desc', style['desc']),
@@ -428,7 +430,7 @@ def update_style(id):
         }
 
         db.execute('''
-            UPDATE styles 
+            UPDATE styles
             SET no = ?, desc = ?, color = ?, category = ?, sizes = ?, qty = ?, status = ?,
                 orderDate = ?, dueDate = ?, trackingTemplateId = ?, image = ?,
                 lastEditedBy = ?, lastEditedAt = ?, bomData = ?, trackingSteps = ?
@@ -441,25 +443,25 @@ def update_style(id):
             merged['trackingSteps'],
             id
         ))
-        
+
     db.commit()
     return jsonify({"success": True})
 
 @app.route('/api/styles/<int:id>', methods=['DELETE'])
 def delete_style(id):
     db = get_db()
-    
+
     # Find deliveryId for this style before deleting to decrement the count
     cursor = db.execute('SELECT deliveryId FROM styles WHERE id = ?', (id,))
     row = cursor.fetchone()
-    
+
     if row:
         deliveryId = row['deliveryId']
         db.execute('UPDATE styles SET isDeleted = 1, deletedAt = ? WHERE id = ?', (datetime.now().isoformat(), id))
         # Update delivery item count
         db.execute('UPDATE deliveries SET items = MAX(0, items - 1) WHERE id = ?', (deliveryId,))
         db.commit()
-        
+
     return jsonify({"success": True})
 
 # --- Materials Endpoints ---
@@ -495,7 +497,7 @@ def add_material():
         INSERT INTO materials (name, type, supplier, color, notes, createdDate)
         VALUES (?, ?, ?, ?, ?, ?)
     ''', (
-        data['name'], data['type'], data.get('supplier', ''), 
+        data['name'], data['type'], data.get('supplier', ''),
         data.get('color', ''), data.get('notes', ''), data['createdDate']
     ))
     db.commit()
@@ -506,11 +508,11 @@ def update_material(id):
     data = request.json
     db = get_db()
     db.execute('''
-        UPDATE materials 
+        UPDATE materials
         SET name = ?, type = ?, supplier = ?, color = ?, notes = ?
         WHERE id = ?
     ''', (
-        data['name'], data['type'], data.get('supplier', ''), 
+        data['name'], data['type'], data.get('supplier', ''),
         data.get('color', ''), data.get('notes', ''), id
     ))
     db.commit()
@@ -561,22 +563,22 @@ def delete_style_material(assignment_id):
 def get_recycle_bin():
     db = get_db()
     items = []
-    
+
     # Fetch Folders
     folders = db.execute('SELECT id, name, createdDate, deletedAt FROM deliveries WHERE isDeleted = 1').fetchall()
     for f in folders:
         items.append({"id": f['id'], "type": "folder", "name": f['name'], "deletedAt": f['deletedAt'], "createdDate": f['createdDate']})
-        
+
     # Fetch Styles
     styles = db.execute('SELECT id, no, desc, createdDate, deletedAt FROM styles WHERE isDeleted = 1').fetchall()
     for s in styles:
         items.append({"id": s['id'], "type": "style", "name": f"Style {s['no']} - {s['desc']}", "deletedAt": s['deletedAt'], "createdDate": s['createdDate']})
-        
+
     # Fetch Materials
     materials = db.execute('SELECT id, name, type, createdDate, deletedAt FROM materials WHERE isDeleted = 1').fetchall()
     for m in materials:
         items.append({"id": m['id'], "type": "material", "name": f"{m['name']} ({m['type']})", "deletedAt": m['deletedAt'], "createdDate": m['createdDate']})
-        
+
     # Fetch Templates
     templates = db.execute('SELECT id, name, deletedAt FROM tracking_templates WHERE isDeleted = 1').fetchall()
     for t in templates:
@@ -592,7 +594,7 @@ def restore_item():
     item_type = data.get('type')
     item_id = data.get('id')
     db = get_db()
-    
+
     if item_type == 'folder':
         db.execute('UPDATE deliveries SET isDeleted = 0, deletedAt = NULL WHERE id = ?', (item_id,))
         # Cascade restore styles
@@ -610,7 +612,7 @@ def restore_item():
         db.execute('UPDATE tracking_templates SET isDeleted = 0, deletedAt = NULL WHERE id = ?', (item_id,))
     else:
         return jsonify({"success": False, "error": "Unknown item type"}), 400
-        
+
     db.commit()
     return jsonify({"success": True})
 
@@ -620,12 +622,12 @@ def empty_recycle_bin():
     item_type = data.get('type')
     item_id = data.get('id')
     db = get_db()
-    
+
     if item_type and item_id:
         # Permanent delete single item
         if item_type == 'folder':
             db.execute('DELETE FROM deliveries WHERE id = ? AND isDeleted = 1', (item_id,))
-            db.execute('DELETE FROM styles WHERE deliveryId = ? AND isDeleted = 1', (item_id,)) 
+            db.execute('DELETE FROM styles WHERE deliveryId = ? AND isDeleted = 1', (item_id,))
         elif item_type == 'style':
             db.execute('DELETE FROM styles WHERE id = ? AND isDeleted = 1', (item_id,))
         elif item_type == 'material':
@@ -638,12 +640,12 @@ def empty_recycle_bin():
         deleted_folders = db.execute('SELECT id FROM deliveries WHERE isDeleted = 1').fetchall()
         for folder in deleted_folders:
             db.execute('DELETE FROM styles WHERE deliveryId = ?', (folder['id'],))
-            
+
         db.execute('DELETE FROM styles WHERE isDeleted = 1')
         db.execute('DELETE FROM deliveries WHERE isDeleted = 1')
         db.execute('DELETE FROM materials WHERE isDeleted = 1')
         db.execute('DELETE FROM tracking_templates WHERE isDeleted = 1')
-        
+
     db.commit()
     return jsonify({"success": True})
 
@@ -652,8 +654,3 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     is_prod = os.environ.get('PORT') is not None  # Render always sets PORT
     app.run(host='0.0.0.0', debug=not is_prod, port=port, use_reloader=False)
-
-
-
-
-
