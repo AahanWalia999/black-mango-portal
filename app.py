@@ -649,9 +649,10 @@ def empty_recycle_bin():
 
 if __name__ == '__main__':
     import os
-  port = int(os.environ.get('PORT', 5000))
+    port = int(os.environ.get('PORT', 5000))
     is_prod = os.environ.get('PORT') is not None  # Render always sets PORT
     app.run(host='0.0.0.0', debug=not is_prod, port=port, use_reloader=False)
+
 
 
 
